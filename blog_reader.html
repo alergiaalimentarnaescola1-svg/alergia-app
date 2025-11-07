@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alergia Alimentar na Escola App</title>
+    <!-- Carrega o Tailwind CSS para estilização moderna e responsiva -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Configuração de fonte e cores base */
+        :root {
+            --primary: #4f46e5; /* Indigo */
+            --secondary: #6ee7b7; /* Emerald */
+            --background: #f8fafc; /* Slate 50 */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--background);
+        }
+        /* Estilos para o conteúdo do post para garantir legibilidade */
+        #post-content img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            margin: 12px 0;
+        }
+        #post-content p {
+            margin-bottom: 1rem;
+            line-height: 1.6;
+        }
+        #post-content h2, #post-content h3 {
+            font-weight: 600;
+            margin-top: 1.5rem;
+            margin-bottom: 0.5rem;
+            color: #1f2937; /* Dark text */
+        }
+        /* Estilo para links de botões de volta */
+        .back-button {
+            transition: all 0.2s;
+        }
+        .back-button:hover {
+            color: var(--primary);
+            transform: translateX(-4px);
+        }
+    </style>
+</head>
+<body class="antialiased min-h-screen">
+
+    <div id="app" class="max-w-xl mx-auto shadow-xl bg-white min-h-screen">
+        <!-- Cabeçalho Fixo -->
+        <header class="p-4 bg-white border-b border-gray-200 sticky top-0 z-10">
+            <h1 id="header-title" class="text-2xl font-bold text-gray-800 transition-opacity duration-300">
+                Alergia Alimentar
+            </h1>
+            <p id="header-subtitle" class="text-sm text-gray-500">
+                Informação segura para a escola
+            </p>
+        </header>
+
+        <!-- Seção de Busca (Visível apenas na Lista) -->
+        <div id="search-section" class="p-4 bg-white border-b border-gray-100 sticky top-20 z-10 transition-all duration-300">
+            <input type="text" id="search-input" placeholder="Buscar posts por título..."
+                   class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-shadow">
+        </div>
+
+        <!-- Conteúdo Principal do Aplicativo -->
+        <main class="p-4">
+            <!-- Tela de Lista de Posts -->
+            <div id="post-list-view" class="space-y-4">
+                <div id="post-list" class="space-y-4">
+                    <!-- Posts serão injetados aqui -->
+                </div>
+            </div>
+
+            <!-- Tela de Detalhes do Post (Inicialmente oculta) -->
+            <div id="post-detail-view" class="hidden">
+                <button id="back-button" class="back-button mb-4 text-gray-600 font-medium flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
+                    </svg>
+                    Voltar para a Lista
+                </button>
+                <h2 id="detail-title" class="text-3xl font-extrabold text-gray-900 mb-4 leading-snug"></h2>
+                <p id="detail-date" class="text-sm text-indigo-600 font-semibold mb-6"></p>
+                <div id="post-content" class="prose max-w-none text-gray-700">
+                    <!-- Conteúdo completo do post será injetado aqui -->
+                </div>
+            </div>
+
+            <!-- Indicador de Carregamento/Erros -->
+            <div id="status-message" class="text-center p-8 hidden">
+                <p class="text-lg text-gray-500" id="message-text">Carregando conteúdo...</p>
+                <div id="loading-spinner" class="mt-4 mx-auto w-10 h-10 border-4 border-t-4 border-indigo-200 border-t-indigo-500 rounded-full animate-spin"></div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Variáveis globais para o estado do aplicativo
+        let allPosts = [];
+        let currentView = 'list';
+        let selectedPost = null;
+
+        // URL do Feed RSS do Blogspot e Proxy para contornar problemas de CORS no navegador
+        // Usamos o rss2json.com como um proxy confiável
+        const BLOGSPOT_RSS_URL = 'https://alergiaalimentarnaescola.blogspot.com/feeds/posts/default?alt=rss';
+        const PROXY_API_URL = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(BLOGSPOT_RSS_URL)}`;
+
+        // Elementos do DOM
+        const postList = document.getElementById('post-list');
+        const postListView = document.getElementById('post-list-view');
+        const postDetailView = document.getElementById('post-detail-view');
+        const detailTitle = document.getElementById('detail-title');
+        const detailDate = document.getElementById('detail-date');
+        const postContent = document.getElementById('post-content');
+        const backButton = document.getElementById('back-button');
+        const searchInput = document.getElementById('search-input');
+        const searchSection = document.getElementById('search-section');
+        const statusMessage = document.getElementById('status-message');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const messageText = document.getElementById('message-text');
+
+        // Função utilitária para formatar a data
+        const formatDate = (dateString) => {
+            const options = { day: '2-digit', month: 'long', year: 'numeric' };
+            try {
+                return new Date(dateString).toLocaleDateString('pt-BR', options);
+            } catch {
+                return dateString;
+            }
+        };
+
+        // Função para mostrar a mensagem de status e ocultar o conteúdo
+        const showStatus = (text, isLoading = false) => {
+            messageText.textContent = text;
+            loadingSpinner.classList.toggle('hidden', !isLoading);
+            statusMessage.classList.remove('hidden');
+            postListView.classList.add('hidden');
+            postDetailView.classList.add('hidden');
+        };
+
+        // Função principal para carregar os posts
+        const loadPosts = async () => {
+            showStatus('Carregando conteúdo...', true);
+            try {
+                const response = await fetch(PROXY_API_URL);
+                if (!response.ok) {
+                    throw new Error(`Erro de rede: ${response.status}`);
+                }
+                const data = await response.json();
+
+                if (data.status === 'ok' && data.items) {
+                    allPosts = data.items.map(item => ({
+                        title: item.title,
+                        pubDate: formatDate(item.pubDate),
+                        description: item.description, // Conteúdo do post
+                        link: item.link
+                    }));
+                    renderPostList(allPosts);
+                    updateView('list');
+                } else {
+                    throw new Error(data.message || 'Falha ao carregar o feed RSS.');
+                }
+            } catch (error) {
+                console.error('Erro ao buscar posts:', error);
+                showStatus(`Erro ao carregar o blog. Verifique sua conexão. (${error.message})`, false);
+            }
+        };
+
+        // Função para renderizar a lista de posts
+        const renderPostList = (postsToRender) => {
+            postList.innerHTML = '';
+            if (postsToRender.length === 0) {
+                postList.innerHTML = '<p class="text-center text-gray-500 p-8">Nenhum post encontrado com este termo de busca.</p>';
+                return;
+            }
+
+            postsToRender.forEach((post, index) => {
+                const postElement = document.createElement('div');
+                postElement.classList.add('p-4', 'bg-white', 'rounded-xl', 'shadow-md', 'hover:shadow-lg', 'transition-all', 'duration-300', 'cursor-pointer', 'border', 'border-gray-100');
+                
+                // Extrai um trecho curto do conteúdo para o resumo
+                const snippet = post.description.replace(/<[^>]*>?/gm, '').substring(0, 150) + '...';
+
+                postElement.innerHTML = `
+                    <h3 class="text-xl font-semibold text-gray-800 mb-1">${post.title}</h3>
+                    <p class="text-xs text-indigo-500 font-medium mb-2">${post.pubDate}</p>
+                    <p class="text-sm text-gray-600">${snippet}</p>
+                `;
+                postElement.addEventListener('click', () => showPostDetails(index));
+                postList.appendChild(postElement);
+            });
+        };
+
+        // Função para exibir os detalhes do post
+        const showPostDetails = (index) => {
+            selectedPost = allPosts[index];
+
+            if (selectedPost) {
+                detailTitle.textContent = selectedPost.title;
+                detailDate.textContent = `Publicado em: ${selectedPost.pubDate}`;
+                // O conteúdo do RSS (description) vem em HTML, injetamos diretamente
+                postContent.innerHTML = selectedPost.description; 
+                
+                // Remove links externos do conteúdo do blog para manter o usuário no app
+                postContent.querySelectorAll('a').forEach(link => {
+                    link.removeAttribute('href');
+                    link.classList.add('text-indigo-600', 'font-semibold', 'cursor-pointer');
+                });
+                
+                updateView('detail');
+            }
+        };
+
+        // Função para alternar entre as views
+        const updateView = (view) => {
+            currentView = view;
+            statusMessage.classList.add('hidden'); // Oculta qualquer mensagem de status
+
+            if (view === 'list') {
+                postListView.classList.remove('hidden');
+                postDetailView.classList.add('hidden');
+                searchSection.classList.remove('hidden');
+                document.getElementById('header-title').textContent = 'Alergia Alimentar';
+            } else if (view === 'detail') {
+                postListView.classList.add('hidden');
+                postDetailView.classList.remove('hidden');
+                searchSection.classList.add('hidden');
+                document.getElementById('header-title').textContent = 'Detalhes do Post';
+                // Rola para o topo ao mudar para a tela de detalhes
+                document.getElementById('app').scrollTop = 0;
+            }
+        };
+
+        // Implementação da busca
+        const handleSearch = (event) => {
+            const searchTerm = event.target.value.toLowerCase().trim();
+            if (searchTerm === '') {
+                renderPostList(allPosts);
+            } else {
+                const filteredPosts = allPosts.filter(post =>
+                    post.title.toLowerCase().includes(searchTerm)
+                );
+                renderPostList(filteredPosts);
+            }
+        };
+
+        // Listeners de Eventos
+        backButton.addEventListener('click', () => updateView('list'));
+        searchInput.addEventListener('input', handleSearch);
+
+        // Inicia o aplicativo carregando os posts
+        window.onload = loadPosts;
+    </script>
+</body>
+</html>
